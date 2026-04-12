@@ -1,13 +1,15 @@
 from flask import Flask
 from flask_cors import CORS
 from routes.system import system_bp
-from routes.processes import processes_bp     # ← Add this
+from routes.processes import processes_bp
+from routes.file_vault import vault_bp        # ← Add this
 
 app = Flask(__name__)
 CORS(app)
 
 app.register_blueprint(system_bp)
-app.register_blueprint(processes_bp)          # ← Add this
+app.register_blueprint(processes_bp)
+app.register_blueprint(vault_bp)             # ← Add this
 
 @app.route('/')
 def home():

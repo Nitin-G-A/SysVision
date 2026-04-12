@@ -9,24 +9,27 @@ import {
 const API = 'http://localhost:5000';
 
 export default function App() {
-  const [cpu, setCpu]             = useState(null);
-  const [memory, setMemory]       = useState(null);
+  const [cpu, setCpu]               = useState(null);
+  const [memory, setMemory]         = useState(null);
   const [cpuHistory, setCpuHistory] = useState([]);
-  const [processes, setProcesses] = useState([]);
-  const [search, setSearch]       = useState('');
-  const [sortBy, setSortBy]       = useState('cpu');
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [processes, setProcesses]   = useState([]);
+  const [search, setSearch]         = useState('');
+  const [sortBy, setSortBy]         = useState('cpu');
+  const [activeTab, setActiveTab]   = useState('dashboard');
+
+  // Vault states
+  const [vaultFile, setVaultFile]     = useState(null);
+  const [vaultStatus, setVaultStatus] = useState('');
+  const [vaultLoading, setVaultLoading] = useState(false);
 
   const fetchData = async () => {
     try {
       const cpuRes  = await axios.get(`${API}/api/cpu`);
       const memRes  = await axios.get(`${API}/api/memory`);
       const procRes = await axios.get(`${API}/api/processes`);
-
       setCpu(cpuRes.data);
       setMemory(memRes.data);
       setProcesses(procRes.data);
-
       setCpuHistory(prev => {
         const newPoint = {
           time: new Date().toLocaleTimeString(),
@@ -45,23 +48,83 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Kill a process by PID
+  // ── VAULT FUNCTIONS ──
+  const handleEncrypt = async () => {
+    if (!vaultFile) return setVaultStatus('⚠️ Please select a file first!');
+    setVaultLoading(true);
+    setVaultStatus('🔐 Encrypting...');
+    try {
+      // FormData is used to send files via HTTP
+      const formData = new FormData();
+      formData.append('file', vaultFile);  // attach file
+
+      // axios.post with responseType:'blob' to receive file download
+      const response = await axios.post(
+        `${API}/api/vault/encrypt`,
+        formData,
+        { responseType: 'blob' }  // blob = binary large object (file)
+      );
+
+      // Create a download link programmatically
+      downloadBlob(response.data, vaultFile.name + '.vault');
+      setVaultStatus('✅ File encrypted & downloaded as .vault!');
+    } catch (err) {
+      setVaultStatus('❌ Encryption failed!');
+    }
+    setVaultLoading(false);
+  };
+
+  const handleDecrypt = async () => {
+    if (!vaultFile) return setVaultStatus('⚠️ Please select a .vault file!');
+    if (!vaultFile.name.endsWith('.vault')) {
+      return setVaultStatus('⚠️ Please select a .vault file to decrypt!');
+    }
+    setVaultLoading(true);
+    setVaultStatus('🔓 Decrypting...');
+    try {
+      const formData = new FormData();
+      formData.append('file', vaultFile);
+      const response = await axios.post(
+        `${API}/api/vault/decrypt`,
+        formData,
+        { responseType: 'blob' }
+      );
+      const originalName = vaultFile.name.replace('.vault', '');
+      downloadBlob(response.data, originalName);
+      setVaultStatus('✅ File decrypted & downloaded!');
+    } catch (err) {
+      setVaultStatus('❌ Decryption failed — wrong key or bad file!');
+    }
+    setVaultLoading(false);
+  };
+
+  // Helper: triggers browser file download from blob data
+  const downloadBlob = (data, filename) => {
+    const url    = window.URL.createObjectURL(new Blob([data]));
+    const link   = document.createElement('a');
+    link.href    = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
   const killProcess = async (pid, name) => {
     if (!window.confirm(`Kill process "${name}" (PID: ${pid})?`)) return;
     try {
       await axios.post(`${API}/api/processes/kill`, { pid });
       alert(`✅ Process ${name} terminated!`);
-      fetchData(); // Refresh list
+      fetchData();
     } catch (err) {
       alert(`❌ Failed: ${err.response?.data?.error || 'Unknown error'}`);
     }
   };
 
-  // Filter & sort processes based on search and sortBy
   const filteredProcesses = processes
     .filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => b[sortBy] - a[sortBy])
-    .slice(0, 50); // Show top 50 only
+    .slice(0, 50);
 
   if (!cpu || !memory) {
     return (
@@ -75,55 +138,45 @@ export default function App() {
     core: `C${i}`, usage
   }));
 
+  const tabs = ['dashboard', 'processes', 'vault'];
+
   return (
     <div style={styles.container}>
 
-      {/* ── HEADER ── */}
+      {/* HEADER */}
       <div style={styles.header}>
         <h1 style={styles.title}>⚡ SysVision</h1>
         <p style={styles.subtitle}>Real-Time OS Intelligence Dashboard</p>
       </div>
 
-      {/* ── TABS ── */}
+      {/* TABS */}
       <div style={styles.tabRow}>
-        {['dashboard', 'processes'].map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              ...styles.tab,
-              ...(activeTab === tab ? styles.tabActive : {})
-            }}
-          >
-            {tab === 'dashboard' ? '📊 Dashboard' : '⚙️ Processes'}
+        {tabs.map(tab => (
+          <button key={tab} onClick={() => setActiveTab(tab)}
+            style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }}>
+            {tab === 'dashboard' ? '📊 Dashboard'
+             : tab === 'processes' ? '⚙️ Processes'
+             : '🔐 File Vault'}
           </button>
         ))}
       </div>
 
-      {/* ══ DASHBOARD TAB ══ */}
+      {/* DASHBOARD TAB */}
       {activeTab === 'dashboard' && (
         <>
-          {/* Stat Cards */}
           <div style={styles.cardRow}>
-            <StatCard title="CPU Usage"
-              value={`${cpu.cpu_percent}%`}
+            <StatCard title="CPU Usage" value={`${cpu.cpu_percent}%`}
               sub={`${cpu.cpu_count} Cores @ ${cpu.cpu_freq_mhz} MHz`}
               color={cpu.cpu_percent > 80 ? '#ff4444' : '#00d4aa'} />
-            <StatCard title="RAM Used"
-              value={`${memory.ram_percent}%`}
+            <StatCard title="RAM Used" value={`${memory.ram_percent}%`}
               sub={`${memory.ram_used_gb} GB / ${memory.ram_total_gb} GB`}
               color={memory.ram_percent > 80 ? '#ff4444' : '#4dabf7'} />
-            <StatCard title="Disk Used"
-              value={`${memory.disk_percent}%`}
+            <StatCard title="Disk Used" value={`${memory.disk_percent}%`}
               sub={`${memory.disk_used_gb} GB / ${memory.disk_total_gb} GB`}
               color="#f5a623" />
-            <StatCard title="Processes"
-              value={processes.length}
-              sub="Total running"
-              color="#a29bfe" />
+            <StatCard title="Processes" value={processes.length}
+              sub="Total running" color="#a29bfe" />
           </div>
-
-          {/* Charts */}
           <div style={styles.chartRow}>
             <div style={styles.chartBox}>
               <h3 style={styles.chartTitle}>📈 CPU Usage History</h3>
@@ -153,42 +206,26 @@ export default function App() {
         </>
       )}
 
-      {/* ══ PROCESSES TAB ══ */}
+      {/* PROCESSES TAB */}
       {activeTab === 'processes' && (
         <div style={styles.processPanel}>
-
-          {/* Controls */}
           <div style={styles.controls}>
-            <input
-              type="text"
-              placeholder="🔍 Search process name..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={styles.searchInput}
-            />
+            <input type="text" placeholder="🔍 Search process name..."
+              value={search} onChange={e => setSearch(e.target.value)}
+              style={styles.searchInput} />
             <div style={styles.sortButtons}>
               <span style={styles.sortLabel}>Sort by:</span>
               {['cpu', 'memory'].map(key => (
-                <button
-                  key={key}
-                  onClick={() => setSortBy(key)}
-                  style={{
-                    ...styles.sortBtn,
-                    ...(sortBy === key ? styles.sortBtnActive : {})
-                  }}
-                >
+                <button key={key} onClick={() => setSortBy(key)}
+                  style={{ ...styles.sortBtn, ...(sortBy === key ? styles.sortBtnActive : {}) }}>
                   {key === 'cpu' ? '⚡ CPU' : '🧠 RAM'}
                 </button>
               ))}
             </div>
           </div>
-
-          {/* Process Count */}
           <p style={styles.procCount}>
             Showing {filteredProcesses.length} of {processes.length} processes
           </p>
-
-          {/* Table */}
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
               <thead>
@@ -204,32 +241,112 @@ export default function App() {
                     style={{ backgroundColor: i % 2 === 0 ? '#0d0d1a' : '#111128' }}>
                     <td style={styles.td}>{proc.pid}</td>
                     <td style={{ ...styles.td, color: '#00d4aa' }}>{proc.name}</td>
-                    <td style={{
-                      ...styles.td,
-                      color: proc.cpu > 50 ? '#ff4444' : proc.cpu > 20 ? '#f5a623' : '#00d4aa'
-                    }}>
-                      {proc.cpu}%
-                    </td>
-                    <td style={{
-                      ...styles.td,
-                      color: proc.memory > 5 ? '#ff4444' : '#4dabf7'
-                    }}>
-                      {proc.memory}%
-                    </td>
+                    <td style={{ ...styles.td, color: proc.cpu > 50 ? '#ff4444' : proc.cpu > 20 ? '#f5a623' : '#00d4aa' }}>
+                      {proc.cpu}%</td>
+                    <td style={{ ...styles.td, color: proc.memory > 5 ? '#ff4444' : '#4dabf7' }}>
+                      {proc.memory}%</td>
                     <td style={{ ...styles.td, color: '#888' }}>{proc.status}</td>
                     <td style={{ ...styles.td, color: '#888' }}>{proc.username}</td>
                     <td style={styles.td}>
-                      <button
-                        onClick={() => killProcess(proc.pid, proc.name)}
-                        style={styles.killBtn}
-                      >
-                        ✕ Kill
-                      </button>
+                      <button onClick={() => killProcess(proc.pid, proc.name)}
+                        style={styles.killBtn}>✕ Kill</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* VAULT TAB */}
+      {activeTab === 'vault' && (
+        <div style={styles.vaultPanel}>
+
+          <div style={styles.vaultHeader}>
+            <h2 style={styles.vaultTitle}>🔐 File Vault</h2>
+            <p style={styles.vaultSubtitle}>
+              Encrypt any file with AES-256 military-grade encryption
+            </p>
+          </div>
+
+          {/* Info Cards */}
+          <div style={styles.vaultInfoRow}>
+            <div style={styles.vaultInfoCard}>
+              <p style={styles.vaultInfoIcon}>🛡️</p>
+              <p style={styles.vaultInfoTitle}>AES-256</p>
+              <p style={styles.vaultInfoText}>Military-grade encryption standard</p>
+            </div>
+            <div style={styles.vaultInfoCard}>
+              <p style={styles.vaultInfoIcon}>🔑</p>
+              <p style={styles.vaultInfoTitle}>Auto Key</p>
+              <p style={styles.vaultInfoText}>Key auto-generated and stored securely</p>
+            </div>
+            <div style={styles.vaultInfoCard}>
+              <p style={styles.vaultInfoIcon}>📁</p>
+              <p style={styles.vaultInfoTitle}>Any File</p>
+              <p style={styles.vaultInfoText}>Encrypt PDFs, images, docs, any format</p>
+            </div>
+          </div>
+
+          {/* File Upload Zone */}
+          <div style={styles.uploadZone}>
+            <p style={styles.uploadIcon}>📂</p>
+            <p style={styles.uploadText}>Select any file to encrypt or decrypt</p>
+            <input
+              type="file"
+              onChange={e => {
+                setVaultFile(e.target.files[0]);
+                setVaultStatus('');
+              }}
+              style={styles.fileInput}
+            />
+            {vaultFile && (
+              <p style={styles.selectedFile}>
+                Selected: <span style={{ color: '#00d4aa' }}>{vaultFile.name}</span>
+                {' '}({(vaultFile.size / 1024).toFixed(1)} KB)
+              </p>
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div style={styles.vaultBtnRow}>
+            <button
+              onClick={handleEncrypt}
+              disabled={vaultLoading}
+              style={styles.encryptBtn}>
+              {vaultLoading ? '⏳ Processing...' : '🔐 Encrypt File'}
+            </button>
+            <button
+              onClick={handleDecrypt}
+              disabled={vaultLoading}
+              style={styles.decryptBtn}>
+              {vaultLoading ? '⏳ Processing...' : '🔓 Decrypt .vault File'}
+            </button>
+          </div>
+
+          {/* Status Message */}
+          {vaultStatus && (
+            <div style={styles.vaultStatus}>
+              {vaultStatus}
+            </div>
+          )}
+
+          {/* How it works */}
+          <div style={styles.howItWorks}>
+            <h3 style={{ color: '#4dabf7', marginTop: 0 }}>How it works:</h3>
+            <p style={{ color: '#888', fontSize: '0.85rem', margin: '5px 0' }}>
+              1. Select any file (PDF, image, document, etc.)
+            </p>
+            <p style={{ color: '#888', fontSize: '0.85rem', margin: '5px 0' }}>
+              2. Click Encrypt → downloads a .vault file (unreadable)
+            </p>
+            <p style={{ color: '#888', fontSize: '0.85rem', margin: '5px 0' }}>
+              3. To get original back → select .vault file → click Decrypt
+            </p>
+            <p style={{ color: '#555', fontSize: '0.8rem', marginTop: '10px' }}>
+              ⚠️ Keep the secret.key file safe — without it, decryption is impossible!
+            </p>
           </div>
         </div>
       )}
@@ -279,5 +396,24 @@ const styles = {
   th: { padding: '12px 10px', textAlign: 'left', color: '#00d4aa', borderBottom: '1px solid #2a2a4a', position: 'sticky', top: 0, backgroundColor: '#1a1a2e' },
   td: { padding: '8px 10px', color: '#ccc', borderBottom: '1px solid #111128' },
   killBtn: { padding: '4px 10px', borderRadius: '4px', border: '1px solid #ff4444', backgroundColor: 'transparent', color: '#ff4444', cursor: 'pointer', fontSize: '0.8rem' },
+  vaultPanel: { backgroundColor: '#1a1a2e', borderRadius: '12px', padding: '30px', border: '1px solid #2a2a4a', maxWidth: '700px', margin: '0 auto' },
+  vaultHeader: { textAlign: 'center', marginBottom: '25px' },
+  vaultTitle: { color: '#00d4aa', fontSize: '1.8rem', margin: 0 },
+  vaultSubtitle: { color: '#888', fontSize: '0.9rem', marginTop: '8px' },
+  vaultInfoRow: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '25px' },
+  vaultInfoCard: { backgroundColor: '#0d0d1a', borderRadius: '10px', padding: '15px', textAlign: 'center', border: '1px solid #2a2a4a' },
+  vaultInfoIcon: { fontSize: '1.8rem', margin: '0 0 8px 0' },
+  vaultInfoTitle: { color: '#00d4aa', fontWeight: 'bold', margin: '0 0 5px 0', fontSize: '0.9rem' },
+  vaultInfoText: { color: '#666', fontSize: '0.78rem', margin: 0 },
+  uploadZone: { border: '2px dashed #2a2a4a', borderRadius: '12px', padding: '30px', textAlign: 'center', marginBottom: '20px', backgroundColor: '#0d0d1a' },
+  uploadIcon: { fontSize: '2.5rem', margin: '0 0 10px 0' },
+  uploadText: { color: '#888', marginBottom: '15px', fontSize: '0.9rem' },
+  fileInput: { color: '#ccc', fontSize: '0.85rem', cursor: 'pointer' },
+  selectedFile: { marginTop: '12px', color: '#888', fontSize: '0.85rem' },
+  vaultBtnRow: { display: 'flex', gap: '12px', marginBottom: '20px' },
+  encryptBtn: { flex: 1, padding: '14px', borderRadius: '8px', border: 'none', backgroundColor: '#00d4aa', color: '#0d0d1a', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' },
+  decryptBtn: { flex: 1, padding: '14px', borderRadius: '8px', border: '1px solid #4dabf7', backgroundColor: 'transparent', color: '#4dabf7', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' },
+  vaultStatus: { padding: '14px', borderRadius: '8px', backgroundColor: '#0d0d1a', border: '1px solid #2a2a4a', textAlign: 'center', marginBottom: '20px', color: '#ccc', fontSize: '0.95rem' },
+  howItWorks: { backgroundColor: '#0d0d1a', borderRadius: '10px', padding: '20px', border: '1px solid #1a1a3a' },
   footer: { textAlign: 'center', color: '#555', fontSize: '0.8rem', marginTop: '20px' }
 };
