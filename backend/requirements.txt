@@ -4,3 +4,4 @@ flask-jwt-extended
 bcrypt
 gunicorn
 psutil
+cryptography
