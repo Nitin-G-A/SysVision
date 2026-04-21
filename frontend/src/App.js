@@ -6,7 +6,7 @@ import {
   Tooltip, ResponsiveContainer
 } from 'recharts';
 
-const API = 'http://localhost:5000';
+const API = "https://sysvision.onrender.com";;
 
 export default function App() {
   // ── Auth State ──
