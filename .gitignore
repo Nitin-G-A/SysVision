@@ -1,16 +1,43 @@
-# Python
+# =========================
+# Python (Backend)
+# =========================
 backend/venv/
-__pycache__/
+backend/__pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Node
+# =========================
+# Node (Frontend)
+# =========================
 frontend/node_modules/
+frontend/build/
 
-# Env files
+# =========================
+# Environment Variables
+# =========================
 .env
+backend/.env
+frontend/.env
 
-# OS files
+# =========================
+# Database
+# =========================
+*.db
+*.sqlite3
+
+# =========================
+# Secrets (IMPORTANT 🔐)
+# =========================
+backend/secret.key
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# OS Files
+# =========================
 .DS_Store
 Thumbs.db
-
-backend/secret.key
